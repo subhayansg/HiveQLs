@@ -1,0 +1,251 @@
+========================== How to check the configuration file?
+=> All the files are present under hdfs which is Hadoop Distributed File System. so these files are not present in your filesystem or your directory structure
+=> inside hdfs these are stored as: Path("hdfs://host:port/file"));
+=>The setting of the port is present in your xml file under configuration directory of hadoop: $HADOOP_HOME/etc/hadoop/core-site.xml
+=> check hadoop home
+echo $HADOOP_HOME
+=> for itversity, $HADOOP_HOME = /opt/hadoop
+cat /opt/hadoop/etc/hadoop/core-site.xml
+cd /opt/hadoop/etc/hive/conf
+
+=> view hive-site.xml
+=> In general, it will be present in
+cat /etc/hive/conf/hive-site.xml
+=> In itversity
+cat /opt/hive/conf/hive-site.xml
+
+========================== show column headers
+set hive.cli.print.header=true;
+
+========================== To view the warehouse directory
+hive
+set hive.metastore.warehouse.dir;
+
+========================== To create database
+set hive.metastore.warehouse.dir=/user/itv736079/warehouse;
+
+create database subhayang;
+
+========================== Use beeline
+beeline -u jdbc:hive2://
+
+========================== Exit from beeline
+!q
+
+========================== Directly from terminal we can run an adhoc query
+
+beeline -u jdbc:hive2:// -e "select * from subhayang.orders"
+
+=> This will connect to beeline
+=> run the query
+=> exit from beeline
+
+========================== how to run a script from terminal (normally in production scripts are run using a scheduler like Oozie or Airflow)
+
+touch myscript.hql
+=> file extension .hql is just for our own reference, in general linux does not care
+cat > myscript.hql
+show databases;
+use subhayang;
+Ctrl+D to save and exit
+
+beeline -u jdbc:hive2:// -f /home/itv736079/myscript.hql
+
+=> running a script from beeline itself (already logged into beeline)
+source /home/itv736079/myscript.hql
+
+========================== How to access HDFS from Hive terminal
+
+dfs -ls /user/itv736079/warehouse/subhayang.db;
+
+========================== How to check the table type
+
+hive
+describe formatted table_name;
+=>Table Type: MANAGED TABLE
+
+========================== Create a managed table
+
+CREATE TABLE IF NOT EXISTS products_managed(
+id STRING,
+title STRING,
+cost FLOAT
+) 
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE;
+
+========================== Load data from LFS to managed table
+
+LOAD DATA LOCAL INPATH '/home/itv736079/products.csv'
+INTO TABLE products_managed;
+
+=> notice the LOCAL, this means loading data from LFS
+=> We are not specifying where the data should be kept
+=> data will be stored in default path: /user/itv736079/warehouse/subhayang.db/products_managed
+=> In this path you'll see the file: products.csv, so it got placed to HDFS from LFS
+
+========================== Load data from HDFS to managed table
+
+=> Create a directory in HDFS
+hadoop fs -mkdir /user/itv736079/data
+
+=> Load data to HDFS from LFS
+hadoop fs -put /home/itv736079/products.csv /user/itv736079/data/
+
+=> verify
+hadoop fs -ls /user/itv736079/data/
+
+=> Load data to table
+hive
+use subhayang;
+LOAD DATA INPATH '/user/itv736079/data/products.csv'
+INTO TABLE products_managed;
+
+=> After this data will be moved to /user/itv736079/warehouse/subhayang.db/products_managed from /user/itv736079/data/
+=> so we can not see products.csv in /user/itv736079/data/
+
+=> check data in default path
+hadoop fs -ls /user/itv736079/warehouse/subhayang.db/products_managed
+
+========================== Overwrite the data
+
+LOAD DATA LOCAL INPATH '/home/itv736079/products.csv'
+OVERWRITE INTO TABLE products_managed;
+
+========================== Table to table load
+
+=> create another managed table
+CREATE TABLE IF NOT EXISTS products_managed2(
+id STRING,
+title STRING,
+cost FLOAT
+) 
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE;
+
+INSERT INTO products_managed2
+SELECT * FROM products_managed;
+
+========================== Create EXTERNAL table
+
+=> /user/itv736079/data1/products.csv is the file location
+CREATE EXTERNAL TABLE products(
+id STRING,
+title STRING,
+cost FLOAT
+) 
+LOCATION '/user/itv736079/data1/';
+=> If we load the data using above command, 2nd and 3rd column will be populated with null values
+=> as the data is comma separated but we did not specify that
+
+=> correct way to create would be
+CREATE EXTERNAL TABLE products(
+id STRING,
+title STRING,
+cost FLOAT
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+LOCATION '/user/itv736079/data1/';
+
+=> data will be kept in the same HDFS path
+=> i.e. data won't be moved to /user/itv736079/warehouse/subhayang.db/products from /user/itv736079/data1/
+=> verify
+hadoop fs -ls /user/itv736079/data1/
+
+========================== Create a table with an array type column
+CREATE TABLE mobile_phones(
+id STRING,
+title STRING,
+cost FLOAT,
+colours ARRAY<string>,
+screen_size ARRAY<float>
+);
+
+CREATE TABLE mobile_phones(
+id STRING,
+title STRING,
+cost FLOAT,
+colours ARRAY<string>,
+screen_size ARRAY<float>
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+COLLECTION ITEMS TERMINATED BY '#';
+
+========================== Create a table with a map type column
+CREATE TABLE mobile_phones(
+id STRING,
+title STRING,
+cost FLOAT,
+colours ARRAY<string>,
+screen_size ARRAY<float>,
+features MAP<string, boolean>
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+COLLECTION ITEMS TERMINATED BY '#'
+MAP KEYS TERMINATED BY ':';
+
+
+========================== Create a table with a struct type column
+CREATE TABLE mobile_phones(
+id STRING,
+title STRING,
+cost FLOAT,
+colours ARRAY<string>,
+screen_size ARRAY<float>,
+features MAP<string, boolean>,
+information struct<battery:string,camera:string>
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+COLLECTION ITEMS TERMINATED BY '#'
+MAP KEYS TERMINATED BY ':';
+
+========================== UDF
+CREATE TABLE IF NOT EXISTS sample_table(
+name STRING,
+count INT
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n';
+
+LOAD DATA LOCAL INPATH '/home/itv736079/sample_data.txt'
+INTO TABLE sample_table;
+
+=> temporary function (session specific)
+=> Add jar
+hive
+ADD jar /home/itv736079/udf_hive_touppercase.jar;
+
+=> create a temporary function
+CREATE TEMPORARY FUNCTION touppr 
+	AS 'udf_hive_touppercase.ToUpperCase';
+=> package_name.class_name
+
+=> Permanent function
+=> Move jar to HDFS
+hadoop fs -mkdir /user/itv736079/hivejars
+hadoop fs -put /home/itv736079/udf_hive_touppercase.jar /user/itv736079/hivejars
+=> Create permanent function
+CREATE FUNCTION touppr 
+AS 'udf_hive_touppercase.ToUpperCase' USING jar
+'hdfs://m01.itversity.com:9000/user/itv736079/hivejars/udf_hive_touppercase.jar';
+
+========================== How to skip the first line of csv while loading in hive table
+CREATE TABLE temp 
+  ( 
+     name STRING, 
+     id   INT 
+  ) 
+row format delimited fields terminated BY '\t' lines terminated BY '\n' 
+tblproperties("skip.header.line.count"="1");
+
+
+
+
