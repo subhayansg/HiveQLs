@@ -17,6 +17,21 @@ cat /opt/hive/conf/hive-site.xml
 ========================== show column headers
 set hive.cli.print.header=true;
 
+========================== exclude headers/footers from loading into table
+CREATE TABLE temp 
+  ( 
+     name STRING, 
+     id   INT 
+  ) 
+row format delimited fields terminated BY '\t' lines terminated BY '\n' 
+tblproperties('skip.header.line.count'='1'); 
+
+=> To skip first 3 rows
+tblproperties('skip.header.line.count'='3');
+
+=> to skip last 3 rows
+tblproperties('skip.footer.line.count'='3');
+
 ========================== To view the warehouse directory
 hive
 set hive.metastore.warehouse.dir;
@@ -55,11 +70,9 @@ beeline -u jdbc:hive2:// -f /home/itv736079/myscript.hql
 source /home/itv736079/myscript.hql
 
 ========================== How to access HDFS from Hive terminal
-
 dfs -ls /user/itv736079/warehouse/subhayang.db;
 
 ========================== How to check the table type
-
 hive
 describe formatted table_name;
 =>Table Type: MANAGED TABLE
@@ -156,6 +169,21 @@ LOCATION '/user/itv736079/data1/';
 => verify
 hadoop fs -ls /user/itv736079/data1/
 
+=======> What will happen if data is present in default warehouse directory and we create an external table?
+=> keep data in default warehouse directory
+hadoop fs -cp /user/itv736079/data1/products.csv /user/itv736079/warehouse/
+=> create external table
+CREATE EXTERNAL TABLE products_ext_def_dir(
+id STRING,
+title STRING,
+cost FLOAT
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+LOCATION '/user/itv736079/warehouse/subhayang.db/products_ext/';
+=> Now if we drop the table, data remains in the same place as the table was an external table.
+
 ========================== Create a table with an array type column
 CREATE TABLE mobile_phones(
 id STRING,
@@ -246,6 +274,197 @@ CREATE TABLE temp
 row format delimited fields terminated BY '\t' lines terminated BY '\n' 
 tblproperties("skip.header.line.count"="1");
 
+========================== Partitioning
 
 
 
+========================== Bucketing
+CREATE external TABLE customers_bucketed(
+customer_id int,
+customer_fname string,
+customer_lname string,
+customer_email string,
+customer_password string,
+customer_street string,
+customer_city string,
+customer_state string,
+customer_zipcode string
+)
+clustered by(customer_id) into 4 buckets
+row format delimited
+fields terminated BY ',';
+
+insert into customers_bucketed select * from customers;
+
+=> validate
+hadoop fs -ls /user/itv736079/warehouse/subhayang.db/customers_bucketed/
+
+========================== Partitioning with Bucketing
+
+
+
+========================== Map side join
+=> Automatic map side join if possible
+set hive.auto.convert.join=true;
+set hive.mapjoin.smalltable.filesize;
+
+======================================= Inner join as map side join using hints
+=> By default, the below property will be set to true. We need to set it to false to allow hints.
+set hive.ignore.mapjoin.hint=false;
+
+=> And also, the below property will have to be set to false so that Hive does not automatically convert the joins to MapJoin.
+set hive.auto.convert.join=false;
+
+SELECT /*+ MAPJOIN(c) */
+c.customer_id,
+c.customer_fname,
+c.customer_lname,
+o.order_id,
+o.order_date
+FROM orders o
+JOIN customers c
+ON (o.order_customer_id = c.customer_id)
+limit 5;
+=> Here o is the small table/ broadcast table
+
+=> small table
+set hive.mapjoin.smalltable.filesize;
+
+
+=================================== Bucket Map Join
+=> Enforce bucketing
+set hive.enforce.bucketing=true;
+SET hive.optimize.bucketmapjoin = true;
+=> enable Map Join
+set hive.auto.convert.join=true;
+
+CREATE external TABLE customers_bucketed(
+customer_id int,
+customer_fname string,
+customer_lname string,
+customer_email string,
+customer_password string,
+customer_street string,
+customer_city string,
+customer_state string,
+customer_zipcode string
+)
+clustered by(customer_id) into 4 buckets
+row format delimited
+fields terminated BY ',';
+
+insert into customers_bucketed select * from customers;
+
+CREATE external TABLE orders_bucketed(
+order_id int,
+order_date string,
+order_customer_id int,
+order_status string
+)
+clustered by(order_customer_id) into 8 buckets
+row format delimited
+fields terminated BY ',';
+
+insert into orders_bucketed select * from orders;
+
+=> validate, as we did not specify the location while creating the external table, directory will be default
+hadoop fs -ls /user/itv736079/warehouse/subhayang.db/customers_bucketed/
+hadoop fs -ls /user/itv736079/warehouse/subhayang.db/orders_bucketed/
+
+
+
+SELECT c.customer_id, c.customer_fname, c.customer_lname, o.order_id, o.order_date FROM customers_bucketed c JOIN orders_bucketed o ON (c.customer_id = o.order_customer_id) limit 10;
+
+
+=================================== Sort Merge Bucket Join
+set hive.auto.convert.sortmerge.join=true;
+set hive.auto.convert.sortmerge.join.noconditionaltask=true;
+set hive.optimize.bucketmapjoin=true;
+set hive.optimize.bucketmapjoin.sortedmerge=true;
+set hive.enforce.bucketing=true;
+set hive.enforce.sorting=true;
+set hive.auto.convert.join=true;
+
+CREATE TABLE customers_bucketed(
+customer_id int,
+customer_fname string,
+customer_lname string,
+customer_email string,
+customer_password string,
+customer_street string,
+customer_city string,
+customer_state string,
+customer_zipcode string
+)
+clustered by(customer_id)
+sorted by(customer_id asc) into 4 buckets
+row format delimited
+fields terminated BY ',';
+
+insert into customers_bucketed select * from customers;
+
+CREATE TABLE orders_bucketed(
+order_id int,
+order_date string,
+order_customer_id int,
+order_status string
+)
+clusteredby(order_customer_id)
+sorted by(order_customer_id asc) into 4 buckets
+row format delimited
+fields terminated BY ',';
+
+insert into orders_bucketed select * from orders;
+
+SELECT c.customer_id, c.customer_fname, c.customer_lname, o.order_id, o.order_date FROM customers_bucketed c JOIN orders_bucketed o ON (c.customer_id = o.order_customer_id) limit 10;
+
+=> To validate if SMB has occurred or not
+EXPLAIN EXTENDED
+SELECT c.customer_id, c.customer_fname, c.customer_lname, o.order_id, o.order_date FROM customers_bucketed c JOIN orders_bucketed o ON (c.customer_id = o.order_customer_id) limit 10;
+
+
+================================================ tblproperties
+=> block size
+set dfs.block.size;
+
+=> default file format
+set hive.default.fileformat;
+
+=> strict/ non-strict, in strict mode, while using order by clause we need to use limit also
+set hive.mapred.mode;
+
+=> using number in place of column names in order by clause 
+set hive.groupby.orderby.position.alias;
+
+=> determine number of reducers
+set mapred.reduce.tasks;
+set hive.exec.reducers.bytes.per.reducer;
+
+================================================= Hive variables (hiveconf, hivevar)
+=> hiveconf
+set department_number='40’;
+set hiveconf d1='20'; 
+
+SELCET * FROM employee_table WHERE column_6=${hiveconf:department_number};
+
+=> hivevar
+set hivevar:dept_num= 10;
+SELECT * FROM emp_tab WHERE col6=${dept_num};
+
+=> run a hive query from shell using variables
+hive --hiveconf dept_no -e 'select * from emp_tab where col6=${hiveconf:department_number}'
+
+=> variables and hql scripts
+hive --hivevar emp_id=col1 --hiveconf table_name=emp_tab --hivevar dept_no=10 -f /home/itv736079/myscript/variables.hql
+
+=> substituting variables
+set hive.variable.substitute=true;
+set table=table9;
+set new_table={hiveconf:table};
+set new_table;
+=> It will show new_table=table9 
+select * from ${hiveconf:new_table};
+=> will return values from table9
+
+================================================== check value of all Hive and Hadoop configuration variables
+set -v
