@@ -1,83 +1,92 @@
-========================== How to check the configuration file?
+================================================================================= How to check the configuration file?
+
 => All the files are present under hdfs which is Hadoop Distributed File System. so these files are not present in your filesystem or your directory structure
+
 => inside hdfs these are stored as: Path("hdfs://host:port/file"));
+
 =>The setting of the port is present in your xml file under configuration directory of hadoop: $HADOOP_HOME/etc/hadoop/core-site.xml
+
 => check hadoop home
 echo $HADOOP_HOME
+
 => for itversity, $HADOOP_HOME = /opt/hadoop
 cat /opt/hadoop/etc/hadoop/core-site.xml
 cd /opt/hadoop/etc/hive/conf
 
-=> view hive-site.xml
+========================================= view hive-site.xml
+
 => In general, it will be present in
 cat /etc/hive/conf/hive-site.xml
+
 => In itversity
 cat /opt/hive/conf/hive-site.xml
 
-========================== show column headers
-set hive.cli.print.header=true;
 
-========================== exclude headers/footers from loading into table
-CREATE TABLE temp 
-  ( 
-     name STRING, 
-     id   INT 
-  ) 
-row format delimited fields terminated BY '\t' lines terminated BY '\n' 
-tblproperties('skip.header.line.count'='1'); 
+============================================================================== From terminal check all Hive parameters
+hive -e 'SET;'
 
-=> To skip first 3 rows
-tblproperties('skip.header.line.count'='3');
+-- check print parameters
+hive -e 'SET;' | grep print
 
-=> to skip last 3 rows
-tblproperties('skip.footer.line.count'='3');
 
-========================== To view the warehouse directory
+============================================================================== Default database directory
+
+=> /user/hive/warehouse
+
+=> This path is configured by, the hive.metastore.warehouse.dir property in hive-site.xml
+
+=> /user/hive/datawarehouse/myhivebook.db/mytable/<files here>
+
+
+================================================================== get current time
+
+select current_timestamp(); -- Gives in 2021-04-27 00:12:12.233 format
+SELECT current_date; -- Gives system date in YYYY-MM-DD format
+SELECT YEAR(CURRENT_DATE()); -- Get the year
+
+
+============================================================ To view the warehouse directory
 hive
 set hive.metastore.warehouse.dir;
 
-========================== To create database
+
+============================================================= To create database
+
 set hive.metastore.warehouse.dir=/user/itv736079/warehouse;
 
 create database subhayang;
 
-========================== Use beeline
-beeline -u jdbc:hive2://
+============================================================= Create database with the location, comments, and metadata information:
+CREATE DATABASE IF NOT EXISTS myhivedb
+COMMENT 'hive database demo'
+LOCATION '/user/itv736079/warehouse'
+WITH DBPROPERTIES ('creator'='subhayang','date'='2021-04-27')
+;
 
-========================== Exit from beeline
-!q
+============================================================ To show the DDL used to create a database 
+SHOW CREATE DATABASE default; -- For the default database
 
-========================== Directly from terminal we can run an adhoc query
+SHOW CREATE DATABASE myhivedb; -- LOCATION property tells entire path of this db location
 
-beeline -u jdbc:hive2:// -e "select * from subhayang.orders"
+-- an alternative to the above is 
+DESCRIBE DATABASE myhivedb;
 
-=> This will connect to beeline
-=> run the query
-=> exit from beeline
+-- a bit more detailed
+DESCRIBE DATABASE EXTENDED myhivedb;
 
-========================== how to run a script from terminal (normally in production scripts are run using a scheduler like Oozie or Airflow)
 
-touch myscript.hql
-=> file extension .hql is just for our own reference, in general linux does not care
-cat > myscript.hql
-show databases;
-use subhayang;
-Ctrl+D to save and exit
+SHOW DATABASES LIKE 'my.*'; -- pattern matching
 
-beeline -u jdbc:hive2:// -f /home/itv736079/myscript.hql
 
-=> running a script from beeline itself (already logged into beeline)
-source /home/itv736079/myscript.hql
+============================================================ Drop Database
 
-========================== How to access HDFS from Hive terminal
-dfs -ls /user/itv736079/warehouse/subhayang.db;
+DROP DATABASE IF EXISTS myhivedb;--failed when database is not empty, i.e., contains tables
 
-========================== How to check the table type
-hive
-describe formatted table_name;
-=>Table Type: MANAGED TABLE
+DROP DATABASE IF EXISTS myhivedb CASCADE;--drop database and tables
 
-========================== Create a managed table
+
+
+===================================================================== Create a managed/internal table
 
 CREATE TABLE IF NOT EXISTS products_managed(
 id STRING,
@@ -88,8 +97,13 @@ ROW FORMAT DELIMITED
 FIELDS TERMINATED BY ','
 STORED AS TEXTFILE;
 
-========================== Load data from LFS to managed table
+========================================================================================================== LOAD DATA
+=> If the LOCAL keyword is not specified, the files are loaded from the
+=> full Uniform Resource Identifier (URI) specified after INPATH (most of the time, hdfs path)
+=> or the value from the fs.default.name property defined in hdfs-site.xml by default
 
+
+================================================================= Load data from LFS to managed table
 LOAD DATA LOCAL INPATH '/home/itv736079/products.csv'
 INTO TABLE products_managed;
 
@@ -98,7 +112,7 @@ INTO TABLE products_managed;
 => data will be stored in default path: /user/itv736079/warehouse/subhayang.db/products_managed
 => In this path you'll see the file: products.csv, so it got placed to HDFS from LFS
 
-========================== Load data from HDFS to managed table
+================================================================= Load data from HDFS to managed table
 
 => Create a directory in HDFS
 hadoop fs -mkdir /user/itv736079/data
@@ -112,6 +126,7 @@ hadoop fs -ls /user/itv736079/data/
 => Load data to table
 hive
 use subhayang;
+
 LOAD DATA INPATH '/user/itv736079/data/products.csv'
 INTO TABLE products_managed;
 
@@ -121,12 +136,12 @@ INTO TABLE products_managed;
 => check data in default path
 hadoop fs -ls /user/itv736079/warehouse/subhayang.db/products_managed
 
-========================== Overwrite the data
+================================================================== Overwrite the data
 
 LOAD DATA LOCAL INPATH '/home/itv736079/products.csv'
 OVERWRITE INTO TABLE products_managed;
 
-========================== Table to table load
+================================================================== Table to table load
 
 => create another managed table
 CREATE TABLE IF NOT EXISTS products_managed2(
@@ -141,9 +156,38 @@ STORED AS TEXTFILE;
 INSERT INTO products_managed2
 SELECT * FROM products_managed;
 
-========================== Create EXTERNAL table
+
+
+===================================================================== exclude headers/footers from loading into table
+CREATE TABLE temp 
+  ( 
+     name STRING, 
+     id   INT 
+  ) 
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\t'
+LINES TERMINATED BY '\n' 
+TBLPROPERTIES('skip.header.line.count'='1'); 
+
+==============================> To skip first 3 rows
+TBLPROPERTIES('skip.header.line.count'='3');
+
+==============================> to skip last 3 rows
+TBLPROPERTIES('skip.footer.line.count'='3');
+
+==============================================> If table is created already, then run this to remove the header
+ALTER TABLE tablename SET TBLPROPERTIES ('skip.header.line.count'='1');
+
+
+
+=================================================================== show column headers
+set hive.cli.print.header=true;
+
+
+================================================================================= Create EXTERNAL table
 
 => /user/itv736079/data1/products.csv is the file location
+
 CREATE EXTERNAL TABLE products(
 id STRING,
 title STRING,
@@ -169,9 +213,10 @@ LOCATION '/user/itv736079/data1/';
 => verify
 hadoop fs -ls /user/itv736079/data1/
 
-=======> What will happen if data is present in default warehouse directory and we create an external table?
+====================================> What will happen if data is present in default warehouse directory and we create an external table?
 => keep data in default warehouse directory
 hadoop fs -cp /user/itv736079/data1/products.csv /user/itv736079/warehouse/
+
 => create external table
 CREATE EXTERNAL TABLE products_ext_def_dir(
 id STRING,
@@ -183,6 +228,58 @@ FIELDS TERMINATED BY ','
 STORED AS TEXTFILE
 LOCATION '/user/itv736079/warehouse/subhayang.db/products_ext/';
 => Now if we drop the table, data remains in the same place as the table was an external table.
+
+
+
+============================================================ How to check the table type
+hive
+DESCRIBE FORMATTED table_name;
+=>Table Type: MANAGED TABLE
+
+=============================================== Can we convert a managed table to an external table?
+ALTER TABLE table1 SET TBLPROPERTIES('EXTERNAL'='TRUE');
+=> Data will remain in the same location
+
+=============================================== Can we convert an external table to a managed table?
+ALTER TABLE table1 SET TBLPROPERTIES('EXTERNAL'='FALSE');
+=> Data will remain in the same location
+
+
+
+
+========================================================================== CTAS
+CREATE TABLE products_ctas AS
+SELECT * FROM products; 
+
+-- do not that, products is an external table but products_ctas is an managed table
+
+=> This is handy to create an empty table with same schema
+CREATE TABLE products_ctas_2 AS
+SELECT * FROM products
+WHERE 1=2; 
+
+
+========================================================================== Create empty table from another table
+CREATE TABLE products_ctas_3 LIKE products;
+
+
+========================================================================== table column info
+=> only column names
+SHOW COLUMNS IN products;
+
+=> with data types
+DESC products;
+
+
+========================================================================== To show the DDL used to create a table
+SHOW CREATE TABLE products;
+
+
+========================================================================== Show table properties for the specified table
+SHOW TBLPROPERTIES products;
+
+
+
 
 ========================== Create a table with an array type column
 CREATE TABLE mobile_phones(
@@ -234,7 +331,9 @@ FIELDS TERMINATED BY ','
 COLLECTION ITEMS TERMINATED BY '#'
 MAP KEYS TERMINATED BY ':';
 
-========================== UDF
+
+
+=================================================================================== UDF
 CREATE TABLE IF NOT EXISTS sample_table(
 name STRING,
 count INT
@@ -265,21 +364,218 @@ CREATE FUNCTION touppr
 AS 'udf_hive_touppercase.ToUpperCase' USING jar
 'hdfs://m01.itversity.com:9000/user/itv736079/hivejars/udf_hive_touppercase.jar';
 
-========================== How to skip the first line of csv while loading in hive table
-CREATE TABLE temp 
-  ( 
-     name STRING, 
-     id   INT 
-  ) 
-row format delimited fields terminated BY '\t' lines terminated BY '\n' 
-tblproperties("skip.header.line.count"="1");
 
-========================== Partitioning
+================================================================================= Partitioning
+
+================================================= Static Partitioning
+
+=> Create a partitioned table
+
+CREATE TABLE orders_stat_part(
+id string,
+customer_id string,
+product_id string,
+quantity int,
+amount double,
+zipcode char(5)
+)
+PARTITIONED BY (state CHAR(2))
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+;
+-- We should not have the partition column in the column list of the table
+-- So, even if the data to be loaded have the column present, we should not add the column in CREATE table statement. 
+
+CREATE TABLE orders_stat_part1(
+id string,
+customer_id string,
+product_id string,
+quantity int,
+amount double,
+zipcode char(5),
+state CHAR(2)                    -- mentioned in PARTITIONED BY
+)
+PARTITIONED BY (state CHAR(2))
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+;
+====> Doing this would result in an error.
+
+
+=> Load data
+
+LOAD DATA LOCAL INPATH
+'/home/itv736079/week5data/order_ca.csv'
+INTO TABLE orders_stat_part
+PARTITION (state="CA");
+=============== This loads data into one partition, state=CA
+
+ls /user/itv736079/warehouse/subhayang.db/orders_stat_part -- You'll see a subdirectory state=CA
+
+LOAD DATA LOCAL INPATH
+'/home/itv736079/week5data/order_ct.csv'
+INTO TABLE orders_stat_part
+PARTITION (state="CT");
+=============== This loads data into another partition, state=CT
+
+ls /user/itv736079/warehouse/subhayang.db/orders_stat_part -- You'll see 2 subdirectories, state=CA and state=CT
+
+
+================================ show partitions
+SHOW PARTITIONS orders_stat_part;
+
+
+==================================================== Dynamic Partitioning
+
+SET hive.exec.dynamic.partition=true;
+SET hive.exec.dynamic.partition.mode=nonstrict; -- in strict mode we need to have atleast one static partition
+
+=> It is a 3 step process:
+1. Create a non-partioned table and load data
+2. Create partitioned table
+3. Load data to partitioned table from non-partitioned table
+
+
+CREATE TABLE orders_non_part(
+id string,
+customer_id string,
+product_id string,
+quantity int,
+amount double,
+zipcode char(5),
+state CHAR(2)
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+;
+
+
+--> Load data for 3 states into non-partitioned table
+
+LOAD DATA LOCAL INPATH
+'/home/itv736079/week5data/orders_CA_with_state.csv'
+INTO TABLE orders_non_part;
+
+LOAD DATA LOCAL INPATH
+'/home/itv736079/week5data/orders_CT_with_state.csv'
+INTO TABLE orders_non_part;
+
+LOAD DATA LOCAL INPATH
+'/home/itv736079/week5data/orders_NY_with_state.csv'
+INTO TABLE orders_non_part;
+
+
+--> Create dynamically partitioned table
+
+CREATE TABLE orders_dyn_part(
+id string,
+customer_id string,
+product_id string,
+quantity int,
+amount double,
+zipcode char(5)
+)
+PARTITIONED BY (state CHAR(2))
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+;
+-- Do not mention the partition column in create table columns!!
+
+
+--> Load data from non-partitioned to partitioned table
+
+INSERT INTO TABLE orders_dyn_part
+PARTITION (state)
+SELECT * FROM orders_non_part;
 
 
 
-========================== Bucketing
-CREATE external TABLE customers_bucketed(
+==================================================== Dynamic Partitioning with 2 columns
+
+-- create non-partioned table
+
+CREATE TABLE ord_non_prt_w_ctry(
+id string,
+customer_id string,
+product_id string,
+quantity int,
+amount double,
+zipcode char(5),
+country CHAR(2),
+state CHAR(2)
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+;
+
+LOAD DATA LOCAL INPATH
+'/home/itv736079/week5data/orders_country_w_states.csv'
+INTO TABLE ord_non_prt_w_ctry;
+
+
+-- Create a table with 2 partitions
+
+CREATE TABLE ord_dyn_prt_w_ctry(
+id string,
+customer_id string,
+product_id string,
+quantity int,
+amount double,
+zipcode char(5)
+)
+PARTITIONED BY (country string, state string)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+;
+
+
+-- Load data to partitioned table 
+
+INSERT INTO TABLE ord_dyn_prt_w_ctry
+PARTITION (country, state)
+SELECT * FROM ord_non_prt_w_ctry;
+
+
+
+==================================================== Drop/Add (ALTER) Partition
+
+-- Drop Partition
+
+ALTER TABLE ord_dyn_prt_w_ctry     
+DROP IF EXISTS PARTITION (country='US', state='CA');
+
+=> In case of managed tables, DROP PARTITION will remove both partition and data
+=> In case of external tables, data will not be removed. We need to use hadoop fs -rm -r -f /table
+
+
+-- If we need to remove only data from a partition
+
+=> Internal tables
+TRUNCATE TABLE ord_dyn_prt_w_ctry
+PARTITION (country='US', state='CA');
+
+
+-- Add multiple partitions
+
+ALTER TABLE ord_dyn_prt_w_ctry ADD 
+PARTITION (country='IND', state='WB')
+PARTITION (country='US', state='CA');
+
+
+
+
+
+==================================================================================== Bucketing
+
+SET hive.enforce.bucketing=true;
+
+=> It is a 3 step process:
+1. Create a non-bucketed table and load data
+2. Create bucketed table
+3. Load data to bucketed table from non-bucketed table
+
+
+CREATE EXTERNAL TABLE customers_bucketed(
 customer_id int,
 customer_fname string,
 customer_lname string,
@@ -290,32 +586,69 @@ customer_city string,
 customer_state string,
 customer_zipcode string
 )
-clustered by(customer_id) into 4 buckets
-row format delimited
-fields terminated BY ',';
+CLUSTERED BY(customer_id) INTO 4 BUCKETS
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ',';
 
-insert into customers_bucketed select * from customers;
+
+INSERT INTO TABLE customers_bucketed 
+SELECT * FROM customers;
 
 => validate
 hadoop fs -ls /user/itv736079/warehouse/subhayang.db/customers_bucketed/
 
-========================== Partitioning with Bucketing
+
+-- Data loading for selected columns
+FROM customers
+INSERT INTO customers_bucketed_n
+SELECT customer_id, customer_fname, customer_lname;
+
+
+======================================== Display data for a single bucket
+
+SELECT * FROM customers_bucketed
+TABLESAMPLE(bucket 1 out of 4);
 
 
 
-========================== Map side join
+======================================================================================= Partitioning with Bucketing
+
+
+
+
+======================================================================================= Map join
+
+When left table is small:
+
+	>	Inner joins can be treated as MapJoin.
+	>	Left outer joins cannot be treated as MapJoin.
+	>	Right outer joins can be treated as MapJoin.
+	>	Full outer join cannot be treated as MapJoin.
+	
+	
+When right table is small:
+
+	>	Inner joins can be treated as MapJoin.
+	>	Left outer joins can be treated as MapJoin.
+	>	Right outer joins cannot be treated as MapJoin.
+	>	Full outer join cannot be treated as MapJoin.
+
+
 => Automatic map side join if possible
 set hive.auto.convert.join=true;
-set hive.mapjoin.smalltable.filesize;
 
-======================================= Inner join as map side join using hints
+
+=============================================================== Inner join as map join using hints
+
 => By default, the below property will be set to true. We need to set it to false to allow hints.
 set hive.ignore.mapjoin.hint=false;
 
 => And also, the below property will have to be set to false so that Hive does not automatically convert the joins to MapJoin.
 set hive.auto.convert.join=false;
 
-SELECT /*+ MAPJOIN(c) */
+
+=> Inner join with left table small is possible as map join
+SELECT /*+ MAPJOIN(o) */
 c.customer_id,
 c.customer_fname,
 c.customer_lname,
@@ -327,14 +660,74 @@ ON (o.order_customer_id = c.customer_id)
 limit 5;
 => Here o is the small table/ broadcast table
 
-=> small table
+
+=> LEFT OUTER JOIN with left table small, map join is not possible
+SELECT /*+ MAPJOIN(o) */
+c.customer_id,
+c.customer_fname,
+c.customer_lname,
+o.order_id,
+o.order_date
+FROM orders o
+LEFT OUTER JOIN customers c
+ON (o.order_customer_id = c.customer_id)
+limit 5;
+=> This will fail
+
+
+=> RIGHT OUTER JOIN with left table small, map join is possible
+SELECT /*+ MAPJOIN(o) */
+c.customer_id,
+c.customer_fname,
+c.customer_lname,
+o.order_id,
+o.order_date
+FROM orders o
+RIGHT OUTER JOIN customers c
+ON (o.order_customer_id = c.customer_id)
+limit 5;
+=> This will run fine
+
+
+
+=> LEFT OUTER JOIN with right table small, map join is possible
+SELECT /*+ MAPJOIN(o) */
+c.customer_id,
+c.customer_fname,
+c.customer_lname,
+o.order_id,
+o.order_date
+FROM customers c
+LEFT OUTER JOIN  orders o
+ON (o.order_customer_id = c.customer_id)
+limit 5;
+=> This will work
+
+
+
+
+================================================ small table size
+
 set hive.mapjoin.smalltable.filesize;
 
+=> The value of this property indicates the size.
+=> If a file is having lesser size than this then it is considered as small file.
 
-=================================== Bucket Map Join
+
+
+======================================================================================= Bucket Map Join
+
+1. Both tables should be bucketed on the join column
+2. The number of buckets in one table should be an integral multiple of number of buckets in the other table
+	2 - 2,4,6,8
+	3 - 3,6,9,12
+
+=> Both tables can be large tables
+
 => Enforce bucketing
 set hive.enforce.bucketing=true;
-SET hive.optimize.bucketmapjoin = true;
+SET hive.optimize.bucketmapjoin=true;
+
 => enable Map Join
 set hive.auto.convert.join=true;
 
@@ -376,7 +769,12 @@ hadoop fs -ls /user/itv736079/warehouse/subhayang.db/orders_bucketed/
 SELECT c.customer_id, c.customer_fname, c.customer_lname, o.order_id, o.order_date FROM customers_bucketed c JOIN orders_bucketed o ON (c.customer_id = o.order_customer_id) limit 10;
 
 
-=================================== Sort Merge Bucket Join
+======================================================================================= Sort Merge Bucket(SMB) Join
+
+1. Both tables should be bucketed on join column.
+2. Number of buckets in one table should exactly match the number of buckets in another table.
+3. Both tables should be sorted based on the join column.
+
 set hive.auto.convert.sortmerge.join=true;
 set hive.auto.convert.sortmerge.join.noconditionaltask=true;
 set hive.optimize.bucketmapjoin=true;
@@ -468,3 +866,120 @@ select * from ${hiveconf:new_table};
 
 ================================================== check value of all Hive and Hadoop configuration variables
 set -v
+
+
+================================================== vectorization property
+set hive.vectorized.execution.enabled = true;
+
+
+=================================================== auto.purge tblproperties
+=> If we set the auto.purge tblproperties to true while creating the table, DELETE TABLE will not move data to .TRASH directory, instead all data will be deleted permanently.
+tblproperties(“auto.purge”=”true”)
+
+=================================================== treating empty strings as null
+tblproperties(“serialization.null.format”=””)
+
+=================================================== immutable
+=> This will allow to load data in table only for first time. That means you won’t be able to append the data in this table.however you will be able to overwrite the data.
+tblproperties(“immutable”=”true”)
+
+==================================================== compress using gzip
+gzip -c -- <file_to_be_compressed> > new_file.gz
+
+=> unzip
+gzip -d new_file.gz
+
+
+
+========================== Use beeline
+beeline -u jdbc:hive2://
+
+========================== Exit from beeline
+!q
+
+========================== Directly from terminal we can run an adhoc query
+
+beeline -u jdbc:hive2:// -e "select * from subhayang.orders"
+
+=> This will connect to beeline
+=> run the query
+=> exit from beeline
+
+========================== how to run a script from terminal (normally in production scripts are run using a scheduler like Oozie or Airflow)
+
+touch myscript.hql
+=> file extension .hql is just for our own reference, in general linux does not care
+cat > myscript.hql
+show databases;
+use subhayang;
+Ctrl+D to save and exit
+
+beeline -u jdbc:hive2:// -f /home/itv736079/myscript.hql
+
+=> running a script from beeline itself (already logged into beeline)
+source /home/itv736079/myscript.hql
+
+========================== How to access HDFS from Hive terminal
+dfs -ls /user/itv736079/warehouse/subhayang.db;
+
+
+
+
+================================================================================== Interesting queries
+
+
+================================================================= Word count problem
+CREATE TABLE word_count(words STRING);
+
+LOAD DATA LOCAL INPATH '/home/itv736079/word_count.txt'
+INTO TABLE word_count;
+
+
+-- EXPLODE the column
+select explode(split(words,',')) from word_count; 
+
+
+-- Get count
+SELECT word, count(word)
+FROM
+(SELECT EXPLODE(SPLIT(words,',')) AS word FROM word_count) w
+GROUP BY word;
+
+
+================================================================= Incremental load
+
+
+-- incremental_tab is an external Hive table which gets incremental data.
+SELECT
+   t1.*
+FROM
+   (
+      SELECT *
+      FROM
+         incremental_tab
+   )
+   t1
+   JOIN
+      (
+         SELECT
+            emp_id
+          , MAX(modified_date) max_modified
+         FROM
+            (
+               SELECT *
+               FROM
+                  incremental_tab
+            )
+            tmx
+         GROUP BY
+            emp_id
+      )
+      t2
+      ON
+         t1.emp_id            = t2.emp_id
+         AND t1.modified_date = t2.max_modified;
+
+
+
+================================================================= Cumulative sum
+
