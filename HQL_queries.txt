@@ -610,7 +610,12 @@ SELECT * FROM customers_bucketed
 TABLESAMPLE(bucket 1 out of 4);
 
 
+======================================== Create a script to show what happens when we create more buckets than the required buckets
 
+hive -f /home/itv736079/morethnreqbuckets.hql
+
+
+hadoop fs -ls /user/itv736079/warehouse/subhayang.db/cust_bucketed/
 ======================================================================================= Partitioning with Bucketing
 
 
@@ -916,6 +921,10 @@ Ctrl+D to save and exit
 
 beeline -u jdbc:hive2:// -f /home/itv736079/myscript.hql
 
+============ Directly from terminal
+hive -f /home/itv736079/script1.hql
+
+
 => running a script from beeline itself (already logged into beeline)
 source /home/itv736079/myscript.hql
 
@@ -924,9 +933,131 @@ dfs -ls /user/itv736079/warehouse/subhayang.db;
 
 
 
+================================================================================== UDTF, Lateral view
+
+/*
+Ename location1 location2
+A  	  hyd 		bang
+
+Expected output
+Ename location
+A          hyd
+A         bang
+
+*/
+
+CREATE TABLE eloc (ename STRING, loc1 STRING, loc2 STRING);
+
+INSERT INTO eloc VALUES ('A', 'Hyd', 'Bnglr');
+
+
+select array(loc1,loc2) from eloc;
+/*
++------------------+
+|       _c0        |
++------------------+
+| ["Hyd","Bnglr"]  |
++------------------+
+*/
+
+select explode(array(loc1,loc2)) as location from eloc; 
+/*
++-----------+
+| location  |
++-----------+
+| Hyd       |
+| Bnglr     |
++-----------+
+*/
+
+select ename, explode(array(loc1,loc2)) as location from eloc; -- This will fail as we can't have other columns with explode
+
+-- For this we need Lateral view
+SELECT ename, location
+FROM eloc
+LATERAL VIEW EXPLODE(ARRAY(loc1, loc2)) loc AS location;
+/*
++--------+-----------+
+| ename  | location  |
++--------+-----------+
+| A      | Hyd       |
+| A      | Bnglr     |
++--------+-----------+
+*/
+
+
 
 ================================================================================== Interesting queries
 
+================================================================= query on different data types
+Michael|Montreal,Toronto|Male,30|DB:80|Product:Developer^DLead
+Will|Montreal|Male,35|Perl:85|Product:Lead,Test:Lead
+Shelley|New York|Female,27|Python:80|Test:Lead,COE:Architect
+Lucy|Vancouver|Female,57|Sales:89,HR:94|Sales:Lead
+
+
+
+CREATE TABLE IF NOT EXISTS employees_demo (
+name STRING COMMENT 'this is optional column comments',
+work_place ARRAY<STRING>,                  
+gender_age STRUCT<gender:STRING,age:INT>, 
+skills_score MAP<STRING,INT>,              
+depart_title MAP<STRING,ARRAY<STRING>>    
+)
+COMMENT 'This is an internal table' 
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '|' 
+COLLECTION ITEMS TERMINATED BY ','          
+MAP KEYS TERMINATED BY ':'          
+STORED as TEXTFILE;                 
+
+LOAD DATA LOCAL INPATH '/home/itv736079/data/employee.txt'
+OVERWRITE INTO TABLE employees_demo;
+
+0: jdbc:hive2://> select * from employees_demo;
+OK
+
++------------+-------------------------+-------------------------------+------------------------+---------------------------------------+
+|     name   |     work_place          |       gender_age              |     skills_score       |          depart_title                 |
++------------+-------------------------+-------------------------------+------------------------+---------------------------------------+
+| Michael    | ["Montreal","Toronto"]  | {"gender":"Male","age":30}    | {"DB":80}              | {"Product":["Developer^DLead"]}       |
+| Will       | ["Montreal"]            | {"gender":"Male","age":35}    | {"Perl":85}            | {"Product":["Lead"],"Test":["Lead"]}  |
+| Shelley    | ["New York"]            | {"gender":"Female","age":27}  | {"Python":80}          | {"Test":["Lead"],"COE":["Architect"]} |
+| Lucy       | ["Vancouver"]           | {"gender":"Female","age":57}  | {"Sales":89,"HR":94}   | {"Sales":["Lead"]}                    |
++------------+-------------------------+-------------------------------+------------------------+---------------------------------------+
+
+=> If workplace is New York then country is US else CA
+SELECT IF(array_contains(work_place, 'New York'), 'US', 'CA')
+FROM employees_demo;
+
+=> Select only male employees, Struct type can be accessed by .
+SELECT * FROM employees_demo
+WHERE gender_age.gender = 'Male';
+
+=> Map type
+SELECT 
+name, skills_score['DB'] as DB, skills_score['Perl'] as Perl
+FROM employees_demo;
+
+SELECT 
+name
+FROM employees_demo
+WHERE skills_score['DB'] = 80;
+
+SELECT
+name, depart_title['Product'][0] as product_col0, 
+depart_title['Test'][0] as test_col0 
+FROM employees_demo;
+
+=> Subqueries must be given alias
+SELECT name
+FROM
+(SELECT * FROM employees_demo
+WHERE gender_age.gender = 'Male') t1;
+
+================================================================= Project all columns except one
+SET hive.support.quoted.identifiers=none;
+SELECT `(order_id)?+.+` FROM orders; -- skip order_id
 
 ================================================================= Word count problem
 CREATE TABLE word_count(words STRING);
@@ -983,3 +1114,190 @@ FROM
 
 ================================================================= Cumulative sum
 
+
+
+=================================================================
+/HIVE: Analytics Lecture 1/
+
+
+$ vi users.txt
+1 Amit  100 DNA
+2 Sumit 200 DNA
+3 Yadav 300 DNA
+4 Sunil 500 FCS
+5 Kranti  100 FCS
+6 Mahoor  200 FCS
+
+$ vi locations.txt
+1 UP
+2 BIHAR
+3 MP
+4 AP
+5 MAHARASHTRA
+6 GOA
+
+USE default;
+
+CREATE TABLE users
+(
+id INT,
+name STRING,
+salary INT,
+unit STRING
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\t';
+
+CREATE TABLE locations
+(
+id INT,
+location STRING
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\t';
+
+LOAD DATA LOCAL INPATH 'users.txt'
+INTO TABLE users;
+
+LOAD DATA LOCAL INPATH 'locations.txt'
+INTO TABLE locations;
+
+-------------------------------------------
+Getting maximum salary across all the units
+-------------------------------------------
+SELECT unit, MAX(salary) FROM users
+GROUP BY unit;
+
+DNA 300
+FCS 500
+
+-------------------------------------------
+Getting list of employees who have maximum salary across all the units
+-------------------------------------------
+--Not possible with GROUP BY
+
+SELECT id, name, salary, rank FROM
+(
+SELECT id, name, salary, rank() OVER (PARTITION BY unit ORDER BY salary DESC) AS rank
+FROM users
+) temp
+WHERE rank = 1;
+
+--------------------------
+RANK according to salary
+--------------------------
+
+--Skips intermediate numbers in case of a tie.
+
+SELECT rank() OVER (ORDER BY salary), id, name, salary, unit
+FROM users;
+
+1 1 Amit  100 DNA
+1 5 Kranti  100 FCS
+3 2 Sumit 200 DNA
+3 6 Mahoor  200 FCS
+5 3 Yadav 300 DNA
+6 4 Sunil 500 FCS
+
+-------------------------------
+DENSE_RANK according to salary
+-------------------------------
+
+--Doesn't skip intermediate numbers in case of a tie.
+
+SELECT dense_rank() OVER (ORDER BY salary), id, name, salary, unit
+FROM users;
+
+1 1 Amit  100 DNA
+1 5 Kranti  100 FCS
+2 2 Sumit 200 DNA
+2 6 Mahoor  200 FCS
+3 3 Yadav 300 DNA
+4 4 Sunil 500 FCS
+
+---------------------------------------------
+DENSE_RANK according to salary for every unit
+---------------------------------------------
+
+SELECT dense_rank() OVER (PARTITION BY unit ORDER BY salary DESC) AS rank, id, name, salary, unit
+FROM users;
+
+1 3 Yadav 300 DNA
+2 2 Sumit 200 DNA
+3 1 Amit  100 DNA
+1 4 Sunil 500 FCS
+2 6 Mahoor  200 FCS
+3 5 Kranti  100 FCS
+
+---------------------------------------------
+Top 2 highest paid employees for every unit
+---------------------------------------------
+
+SELECT name, salary, unit, rank 
+FROM
+(
+SELECT dense_rank() OVER (PARTITION BY unit ORDER BY salary DESC) AS rank, id, name, salary, unit
+FROM users
+) temp
+WHERE rank <= 2;
+
+Yadav 300 DNA 1
+Sumit 200 DNA 2
+Sunil 500 FCS 1
+Mahoor  200 FCS 2
+
+-----------------------------------------------------------------------------
+Getting current name and salary alongwith next higher salary in the same unit
+-----------------------------------------------------------------------------
+
+SELECT name, salary, LEAD(salary) OVER (PARTITION BY unit ORDER BY salary)
+FROM users;
+
+Amit  100 200
+Sumit 200 300
+Yadav 300 NULL
+Kranti  100 200
+Mahoor  200 500
+Sunil 500 NULL
+
+-------------------------------------------------------------------------------------
+Getting current name and salary alongwith next to next higher salary in the same unit
+-------------------------------------------------------------------------------------
+
+SELECT name, salary, LEAD(salary, 2) OVER (PARTITION BY unit ORDER BY salary)
+FROM users;
+
+Amit  100 300
+Sumit 200 NULL
+Yadav 300 NULL
+Kranti  100 500
+Mahoor  200 NULL
+Sunil 500 NULL
+
+------------------------------------------------------------------------------------------------------------------
+Getting current name and salary alongwith next to next higher salary in the same unit replacing NULL with -1
+------------------------------------------------------------------------------------------------------------------
+
+SELECT name, salary, LEAD(salary, 2, -1) OVER (PARTITION BY unit ORDER BY salary)
+FROM users;
+
+Amit  100 300
+Sumit 200 -1
+Yadav 300 -1
+Kranti  100 500
+Mahoor  200 -1
+Sunil 500 -1
+
+-------------------------------------------------------------------------------------
+Getting current name and salary alongwith the closest lower salary
+-------------------------------------------------------------------------------------
+
+SELECT salary, LAG(salary) OVER (PARTITION BY unit ORDER BY salary)
+FROM users;
+
+100 NULL
+200 100
+300 200
+100 NULL
+200 100
+500 200
