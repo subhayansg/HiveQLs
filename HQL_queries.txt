@@ -179,7 +179,6 @@ TBLPROPERTIES('skip.footer.line.count'='3');
 ALTER TABLE tablename SET TBLPROPERTIES ('skip.header.line.count'='1');
 
 
-
 =================================================================== show column headers
 set hive.cli.print.header=true;
 
